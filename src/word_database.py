@@ -3,20 +3,30 @@ import json
 import os
 from typing import List, Dict, Tuple, Optional
 from datetime import datetime
+from pathlib import Path
 
 class WordDatabase:
     """한국어 단어 데이터베이스 관리 전용 클래스"""
     
-    def __init__(self, db_path: str = r"C:\Users\Jaewon Song\Documents\Development\hongdle\data\korean_words.db"):
+    def __init__(self, db_path: str = None):
         """
         데이터베이스 초기화
         
         Args:
-            db_path: 데이터베이스 파일 경로
+            db_path: 데이터베이스 파일 경로 (None이면 프로젝트 내 data 폴더 사용)
         """
-        self.db_path = db_path
+        if db_path is None:
+            # 현재 파일 기준으로 프로젝트 루트 찾기
+            current_file = Path(__file__)
+            project_root = current_file.parent.parent  # src -> hongdle
+            data_dir = project_root / "data"
+            data_dir.mkdir(exist_ok=True)  # data 폴더가 없으면 생성
+            self.db_path = str(data_dir / "korean_words.db")
+        else:
+            self.db_path = db_path
+            
         # 디렉토리가 없으면 생성
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self.init_database()
     
     def init_database(self):
@@ -435,20 +445,21 @@ if __name__ == "__main__":
     
     print("=== 한국어 단어 DB 구축 및 테스트 ===")
     
-    # 초기화
+    # 초기화 (자동으로 프로젝트의 data 폴더 사용)
     processor = WordProcessor()
-    db = WordDatabase()  # 자동으로 data/processed/korean_words.db 생성
+    db = WordDatabase()
     
-    # 텍스트 파일 경로 (절대경로)
-    text_file_path = r"C:\Users\Jaewon Song\Documents\Development\hongdle\data\korean_words_clean_v2.txt"
+    # 텍스트 파일 경로 (상대경로로 변경)
+    project_root = Path(__file__).parent.parent
+    text_file_path = project_root / "data" / "korean_words_clean_v2.txt"
     
     # 파일 존재 확인
-    if Path(text_file_path).exists():
+    if text_file_path.exists():
         print(f"📖 텍스트 파일 처리 중: {text_file_path}")
         
         try:
             # 텍스트 파일에서 단어 데이터 처리
-            words_data = processor.parse_text_file(text_file_path)
+            words_data = processor.parse_text_file(str(text_file_path))
             print(f"✅ {len(words_data)}개 단어 처리 완료")
             
             # 기존 데이터 삭제 후 새로 구축
