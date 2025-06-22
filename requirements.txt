@@ -1,3 +1,43 @@
-pandas>=1.3.0
-openpyxl>=3.0.0
-pathlib2>=2.3.0
+# 홍들 (Hongdle) - 한국어 Wordle 게임
+# Python 3.8+ 권장 (typing과 pathlib의 안정적 지원)
+
+# 현재 프로젝트는 Python 표준 라이브러리만 사용합니다.
+# 외부 의존성이 없으므로 별도의 패키지 설치가 필요하지 않습니다.
+
+# 사용 중인 표준 라이브러리:
+# - sys, os, pathlib (파일 시스템)
+# - sqlite3, json (데이터베이스 및 직렬화)  
+# - re (정규 표현식)
+# - typing, collections (타입 힌트 및 자료구조)
+# - datetime (날짜/시간 처리)
+
+# 설치 방법:
+# git clone https://github.com/JaewonSongJ1/hongdle.git
+# cd hongdle
+# python misc/hongdle_game.py# 홍들 (Hongdle) - 한국어 Wordle 게임
+# Python 3.8+ 필요
+
+# 현재 프로젝트는 Python 표준 라이브러리만 사용하므로
+# 외부 의존성이 없습니다.
+
+# 만약 향후 기능 확장을 위해 고려할 수 있는 라이브러리들:
+
+# 데이터 분석 및 최적화 (선택사항)
+# pandas>=1.3.0
+# numpy>=1.21.0
+
+# 웹 인터페이스 (선택사항)  
+# flask>=2.0.0
+# fastapi>=0.70.0
+
+# 성능 향상 (선택사항)
+# numba>=0.56.0
+
+# 테스팅 (개발용)
+# pytest>=6.0.0
+# pytest-cov>=3.0.0
+
+# 코드 품질 (개발용)
+# black>=22.0.0
+# flake8>=4.0.0
+# mypy>=0.950
