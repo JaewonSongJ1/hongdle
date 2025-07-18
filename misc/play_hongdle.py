@@ -17,36 +17,6 @@ sys.path.append(str(src_dir))
 
 from game_engine import GameEngine
 
-def select_game_mode(project_root: Path) -> Optional[str]:
-    """사용자에게 게임 모드를 선택받아 DB 경로를 반환합니다."""
-    simple_db_path = str(project_root / 'data' / 'korean_words_simple.db')
-    full_db_path = str(project_root / 'data' / 'korean_words_full.db')
-
-    simple_exists = Path(simple_db_path).exists()
-    full_exists = Path(full_db_path).exists()
-
-    if not simple_exists and not full_exists:
-        print("\n❌ 'data' 폴더에 'korean_words_simple.db' 또는 'korean_words_full.db' 파일이 없습니다.")
-        print("   DB 생성 스크립트를 먼저 실행해주세요.")
-        return None
-
-    print("\n🕹️  게임 모드를 선택하세요:")
-    options = {}
-    if simple_exists:
-        options['1'] = simple_db_path
-        print("1. 🚀 Simple 모드 (간단한 단어 DB로 빠르게 검색)")
-    if full_exists:
-        options['2'] = full_db_path
-        print("2. 📚 Full 모드 (모든 단어 DB로 상세하게 검색)")
-
-    while True:
-        choice = input(f"선택 ({', '.join(options.keys())}): ").strip()
-        if choice in options:
-            return options[choice]
-        else:
-            print("❌ 잘못된 입력입니다. 가능한 옵션 중에서 선택하세요.")
-
-
 def play_hongdle_game():
     """한국어 Wordle 누적 게임"""
     print("🎮 한국어 Wordle (홍들)")
@@ -69,13 +39,16 @@ def play_hongdle_game():
     print("-" * 50)
     
     # DB 경로 설정
+    # 이제 단일 DB(full)를 기본으로 사용합니다.
     project_root = Path(__file__).parent.parent
-    
-    # 모드 선택
-    db_path = select_game_mode(project_root)
+    db_path = str(project_root / 'data' / 'korean_words_full.db')
+
     if not db_path:
         return # Exit if no DB is selected or available
-
+    if not Path(db_path).exists():
+        print(f"\n❌ 데이터베이스 파일을 찾을 수 없습니다: {db_path}")
+        print("   먼저 DB 생성 스크립트를 실행해주세요.")
+        return
     # 게임 엔진 초기화
     engine = GameEngine(db_path=db_path)
     
@@ -95,12 +68,14 @@ def play_hongdle_game():
                 candidates = engine.get_current_candidates()
                 print(f"📊 현재 후보: {len(candidates):,}개")
                 
-                # 후보가 적으면 일부 표시
-                if 1 <= len(candidates) <= 5:
-                    print("🎪 남은 후보들:")
-                    for i, word in enumerate(candidates, 1):
-                        jamos = engine.processor.decompose_to_string(word)
-                        print(f"   {i}. {word} ({' '.join(list(jamos))})")
+                # 후보가 적으면 일부 표시 (빈도순으로 정렬되어 있음)
+                if 1 <= len(candidates) <= 10:
+                    print("🎪 유력 후보 (빈도순 TOP 10):")
+                    for i, word_info in enumerate(candidates[:10], 1):
+                        word = word_info['word']
+                        jamos = word_info['jamos']
+                        freq = word_info.get('frequency', 0)
+                        print(f"   {i:2d}. {word:<6} (빈도: {freq:<5d}) -> {' '.join(list(jamos))}")
             
             # 사용자 입력
             user_input = input("\n✏️  입력 (단어 패턴): ").strip()
@@ -143,8 +118,9 @@ def play_hongdle_game():
             
             # 결과 확인
             if len(candidates) == 1:
-                print(f"\n🎉 정답을 찾았습니다: {candidates[0]}")
-                jamos = engine.processor.decompose_to_string(candidates[0])
+                final_word = candidates[0]['word']
+                print(f"\n🎉 정답을 찾았습니다: {final_word}")
+                jamos = engine.processor.decompose_to_string(final_word)
                 print(f"🔤 자모음 분해: {' '.join(list(jamos))}")
                 
                 play_again = input("\n🔄 다시 플레이하시겠습니까? (y/n): ").strip().lower()
@@ -170,7 +146,7 @@ def play_hongdle_game():
                     else:
                         print("취소할 턴이 없습니다.")
             
-            elif len(candidates) <= 10:
+            elif 1 < len(candidates) <= 20:
                 print(f"\n🎯 후보가 {len(candidates)}개로 줄어들었습니다!")
                 
             elif len(candidates) >= 1000:

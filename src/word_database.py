@@ -5,6 +5,9 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 from pathlib import Path
 
+#How to use
+#python src/word_database.py --input data/korean_word_clean_list.txt --output data/korean_words_full.db  
+
 class WordDatabase:
     """한국어 단어 데이터베이스 관리 전용 클래스"""
     
@@ -35,12 +38,14 @@ class WordDatabase:
         cursor = conn.cursor()
         
         # words 테이블 생성
+        # frequency 컬럼을 추가하여 단어 빈도를 저장합니다.
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS words (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 word TEXT UNIQUE NOT NULL,
                 length INTEGER NOT NULL,
                 jamos TEXT NOT NULL,
+                frequency INTEGER NOT NULL DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -57,6 +62,7 @@ class WordDatabase:
         # 인덱스 생성
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_length ON words(length)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_jamos ON words(jamos)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_frequency ON words(frequency DESC)')
         
         # 메타데이터 초기화
         cursor.execute('''
@@ -76,7 +82,7 @@ class WordDatabase:
         단어 하나를 데이터베이스에 삽입
         
         Args:
-            word_data: WordProcessor에서 생성한 단어 데이터
+            word_data: WordProcessor에서 생성한 단어 데이터 (frequency 포함)
             
         Returns:
             삽입 성공 여부
@@ -86,9 +92,9 @@ class WordDatabase:
         
         try:
             cursor.execute('''
-                INSERT OR IGNORE INTO words (word, length, jamos)
-                VALUES (?, ?, ?)
-            ''', (word_data['word'], word_data['length'], word_data['jamos']))
+                INSERT OR IGNORE INTO words (word, length, jamos, frequency)
+                VALUES (?, ?, ?, ?)
+            ''', (word_data['word'], word_data['length'], word_data['jamos'], word_data.get('frequency', 0)))
             
             success = cursor.rowcount > 0
             conn.commit()
@@ -105,7 +111,7 @@ class WordDatabase:
         여러 단어를 한번에 데이터베이스에 삽입
         
         Args:
-            words_data: WordProcessor에서 생성한 단어 데이터 리스트
+            words_data: WordProcessor에서 생성한 단어 데이터 리스트 (frequency 포함)
             
         Returns:
             삽입 결과 통계
@@ -121,9 +127,9 @@ class WordDatabase:
             for word_data in words_data:
                 try:
                     cursor.execute('''
-                        INSERT OR IGNORE INTO words (word, length, jamos)
-                        VALUES (?, ?, ?)
-                    ''', (word_data['word'], word_data['length'], word_data['jamos']))
+                        INSERT OR IGNORE INTO words (word, length, jamos, frequency)
+                        VALUES (?, ?, ?, ?)
+                    ''', (word_data['word'], word_data['length'], word_data['jamos'], word_data.get('frequency', 0)))
                     
                     if cursor.rowcount > 0:
                         inserted += 1
@@ -160,7 +166,7 @@ class WordDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('SELECT id, word, length, jamos FROM words WHERE id = ?', (word_id,))
+        cursor.execute('SELECT id, word, length, jamos, frequency FROM words WHERE id = ?', (word_id,))
         result = cursor.fetchone()
         conn.close()
         
@@ -169,7 +175,8 @@ class WordDatabase:
                 'id': result[0],
                 'word': result[1],
                 'length': result[2],
-                'jamos': result[3]
+                'jamos': result[3],
+                'frequency': result[4]
             }
         return None
     
@@ -178,7 +185,7 @@ class WordDatabase:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('SELECT id, word, length, jamos FROM words WHERE word = ?', (word,))
+        cursor.execute('SELECT id, word, length, jamos, frequency FROM words WHERE word = ?', (word,))
         result = cursor.fetchone()
         conn.close()
         
@@ -187,16 +194,17 @@ class WordDatabase:
                 'id': result[0],
                 'word': result[1],
                 'length': result[2],
-                'jamos': result[3]
+                'jamos': result[3],
+                'frequency': result[4]
             }
         return None
     
     def get_words_by_length(self, length: int) -> List[Dict]:
-        """특정 길이의 모든 단어 조회"""
+        """특정 길이의 모든 단어 조회 (빈도순 정렬)"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        cursor.execute('SELECT id, word, length, jamos FROM words WHERE length = ? ORDER BY word', (length,))
+        cursor.execute('SELECT id, word, length, jamos, frequency FROM words WHERE length = ? ORDER BY frequency DESC, word', (length,))
         results = cursor.fetchall()
         conn.close()
         
@@ -205,7 +213,8 @@ class WordDatabase:
                 'id': row[0],
                 'word': row[1],
                 'length': row[2],
-                'jamos': row[3]
+                'jamos': row[3],
+                'frequency': row[4]
             }
             for row in results
         ]
@@ -213,7 +222,7 @@ class WordDatabase:
     def search_words_by_jamo_pattern(self, length: int, known_positions: Dict[int, str] = None, 
                                    excluded_jamos: List[str] = None) -> List[Dict]:
         """
-        자모음 패턴으로 단어 검색 (Wordle 게임용)
+        자모음 패턴으로 단어 검색 (Wordle 게임용, 빈도순 정렬)
         
         Args:
             length: 단어 길이
@@ -227,7 +236,7 @@ class WordDatabase:
         cursor = conn.cursor()
         
         # 기본 쿼리
-        query = "SELECT id, word, length, jamos FROM words WHERE length = ?"
+        query = "SELECT id, word, length, jamos, frequency FROM words WHERE length = ?"
         params = [length]
         
         # 확정된 위치 조건 추가
@@ -243,7 +252,7 @@ class WordDatabase:
                 query += f" AND jamos NOT LIKE ?"
                 params.append(f"%{jamo}%")
         
-        query += " ORDER BY word"
+        query += " ORDER BY frequency DESC, word"
         
         cursor.execute(query, params)
         results = cursor.fetchall()
@@ -254,7 +263,8 @@ class WordDatabase:
                 'id': row[0],
                 'word': row[1],
                 'length': row[2],
-                'jamos': row[3]
+                'jamos': row[3],
+                'frequency': row[4]
             }
             for row in results
         ]
@@ -332,15 +342,16 @@ class WordDatabase:
             cursor = conn.cursor()
             
             if length is not None:
-                cursor.execute('SELECT word, length, jamos FROM words WHERE length = ? ORDER BY word', (length,))
+                cursor.execute('SELECT word, length, jamos, frequency FROM words WHERE length = ? ORDER BY frequency DESC, word', (length,))
             else:
-                cursor.execute('SELECT word, length, jamos FROM words ORDER BY length, word')
+                cursor.execute('SELECT word, length, jamos, frequency FROM words ORDER BY length, frequency DESC, word')
             
             words = [
                 {
                     'word': row[0],
                     'length': row[1],
-                    'jamos': row[2]
+                    'jamos': row[2],
+                    'frequency': row[3]
                 }
                 for row in cursor.fetchall()
             ]
@@ -491,12 +502,21 @@ if __name__ == "__main__":
 
         print(f"\n📖 텍스트 파일 처리 중...")
         # 입력 파일은 이미 정제되었다고 가정하고, 모든 유효한 한글 단어를 처리합니다.
+        # '단어 빈도' 형식의 파일을 파싱합니다.
         words_data = []
         with open(input_file_path, 'r', encoding='utf-8') as f:
             for line in f:
-                word = line.strip()
-                if word and processor.is_valid_hangul(word):
-                    words_data.append(processor.create_word_data(word))
+                parts = line.strip().split()
+                if len(parts) == 2:
+                    word, freq_str = parts
+                    try:
+                        frequency = int(freq_str)
+                        if processor.is_valid_hangul(word):
+                            word_data = processor.create_word_data(word)
+                            word_data['frequency'] = frequency
+                            words_data.append(word_data)
+                    except ValueError:
+                        continue # 빈도 값이 숫자가 아니면 무시
 
         print(f"✅ {len(words_data)}개 유효 단어 처리 완료")
 

@@ -34,23 +34,13 @@ from word_database import WordDatabase
 class GameEngine:
     """한국어 Wordle 게임 엔진 - 간소화된 누적 조건 전용"""
     
-    def __init__(self, db_path: str, fallback_db_path: str = None):
+    def __init__(self, db_path: str):
         """게임 엔진 초기화"""
         self.processor = WordProcessor()
 
         if not Path(db_path).exists():
-            raise FileNotFoundError(f"주 데이터베이스를 찾을 수 없습니다: {db_path}")
+            raise FileNotFoundError(f"데이터베이스를 찾을 수 없습니다: {db_path}")
         self.db = WordDatabase(db_path)
-        # print(f"[INFO] 주 DB가 설정되었습니다: {db_path}") # play_hongdle.py에서 이미 안내하므로 주석 처리
-
-        self.db_fallback = None
-        if fallback_db_path:
-            if Path(fallback_db_path).exists():
-                self.db_fallback = WordDatabase(fallback_db_path)
-                # print(f"[INFO] 폴백(Fallback) DB가 설정되었습니다: {fallback_db_path}")
-            else:
-                # 폴백 DB는 필수가 아니므로 경고만 출력합니다.
-                print(f"[WARNING] 폴백(Fallback) DB를 찾을 수 없습니다: {fallback_db_path}")
 
         self.reset_game()
     
@@ -66,8 +56,9 @@ class GameEngine:
         self.black_positions = {}  # {위치: 자모음} - 특정 위치에서 제외된 자모음들
         self.pure_black_jamos = set()  # 완전히 등장하지 않는 자모음들 (Y에 없는 B)
         self.jamo_exact_counts = {}  # {자모음: 정확한개수} - Y+B 조합으로 확정된 개수
+        self.jamo_min_counts = {}   # {자모음: 최소개수} - Y/G만 있는 경우
     
-    def add_turn(self, guess_word: str, result_pattern: str) -> List[str]:
+    def add_turn(self, guess_word: str, result_pattern: str) -> List[Dict]:
         """
         새로운 턴 추가
         
@@ -156,44 +147,32 @@ class GameEngine:
                     exact_count = g_count + y_count
                     self.jamo_exact_counts[jamo] = exact_count
                     print(f"🎯 {jamo}: 정확히 {exact_count}개 (G:{g_count} + Y:{y_count}, B:{b_count})")
+                    # 정확한 개수를 알면 최소 개수 정보는 필요 없으므로 제거
+                    if jamo in self.jamo_min_counts:
+                        del self.jamo_min_counts[jamo]
                 else:
                     # Y/G만 있는 경우 = 최소 이만큼 존재
                     min_count = g_count + y_count
-                    if jamo in self.jamo_exact_counts:
-                        # 이미 정확한 개수가 있으면 더 엄격한 것 선택
-                        self.jamo_exact_counts[jamo] = max(self.jamo_exact_counts[jamo], min_count)
-                    # 정확한 개수가 없으면 일단 기록하지 않음 (나중에 더 정확한 정보가 올 수 있음)
+                    # 아직 정확한 개수를 모를 때만 최소 개수 업데이트
+                    if jamo not in self.jamo_exact_counts:
+                        self.jamo_min_counts[jamo] = max(self.jamo_min_counts.get(jamo, 0), min_count)
             
             elif b_count > 0:
                 # B만 있는 경우 = 완전히 등장하지 않음
                 self.pure_black_jamos.add(jamo)
                 print(f"❌ {jamo}: 완전히 등장하지 않음")
-    
-    def _find_candidates(self) -> List[str]:
+
+    def _find_candidates(self) -> List[Dict]:
         """현재 조건에 맞는 후보 단어들 찾기"""
-        # 1. 주 DB에서 검색
-        all_words_primary = self.db.get_words_by_length(self.word_length)
+        all_words = self.db.get_words_by_length(self.word_length)
         candidates = []
         
-        for word_info in all_words_primary:
+        for word_info in all_words:
             word = word_info['word']
             jamos = list(word_info['jamos'])
             
             if self._check_word_conditions(jamos):
-                candidates.append(word)
-        
-        # 2. 주 DB에서 후보를 찾았거나, 폴백 DB가 없으면 결과 반환
-        if candidates or not self.db_fallback:
-            return candidates
-
-        # 3. 주 DB에 후보가 없고 폴백 DB가 있으면, 폴백 DB에서 검색
-        print("\n[ℹ️  기본 DB에 후보가 없어 전체 DB에서 검색합니다...]")
-        all_words_fallback = self.db_fallback.get_words_by_length(self.word_length)
-        for word_info in all_words_fallback:
-            word = word_info['word']
-            jamos = list(word_info['jamos'])
-            if self._check_word_conditions(jamos):
-                candidates.append(word)
+                candidates.append(word_info)
         
         return candidates
     
@@ -231,6 +210,12 @@ class GameEngine:
         for jamo, exact_count in self.jamo_exact_counts.items():
             if jamo_counts[jamo] != exact_count:
                 return False
+
+        # 7. 최소 개수 확인 (핵심 추가!)
+        for jamo, min_count in self.jamo_min_counts.items():
+            # 정확한 개수가 확정된 자모음은 이 검사를 통과했으므로 제외
+            if jamo_counts.get(jamo, 0) < min_count:
+                return False
         
         return True
     
@@ -249,6 +234,8 @@ class GameEngine:
         print(f"완전 제외(B): {self.pure_black_jamos}")
         if self.jamo_exact_counts:
             print(f"정확한 개수: {self.jamo_exact_counts}")
+        if self.jamo_min_counts:
+            print(f"최소 개수: {self.jamo_min_counts}")
     
     def _format_black_positions(self) -> str:
         """B 위치 제외 조건을 읽기 쉽게 포맷"""
@@ -261,7 +248,7 @@ class GameEngine:
             formatted.append(f"위치{pos}:[{jamos_str}]")
         return "{" + ", ".join(formatted) + "}"
     
-    def _print_candidates(self, candidates: List[str]):
+    def _print_candidates(self, candidates: List[Dict]):
         """후보 단어들 출력"""
         print(f"\n=== 후보 단어들 ({len(candidates)}개) ===")
         
@@ -273,8 +260,9 @@ class GameEngine:
         for i in range(0, len(candidates), 20):
             batch = candidates[i:i+20]
             print(f"\n[ {i+1}-{i+len(batch)} ]")
-            for j, word in enumerate(batch):
-                jamos = self.processor.decompose_to_string(word)
+            for j, word_info in enumerate(batch):
+                word = word_info['word']
+                jamos = word_info['jamos']
                 jamos_display = ' '.join(list(jamos))
                 print(f"{i+j+1:3d}. {word:<8} -> {jamos_display}")
             
@@ -307,12 +295,14 @@ class GameEngine:
         print(f"  완전히 제외: {self.pure_black_jamos}")
         if self.jamo_exact_counts:
             print(f"  정확한 개수: {self.jamo_exact_counts}")
+        if self.jamo_min_counts:
+            print(f"  최소 개수: {self.jamo_min_counts}")
         
         # 현재 후보 수
         candidates = self._find_candidates()
         print(f"  현재 후보: {len(candidates)}개")
     
-    def get_current_candidates(self) -> List[str]:
+    def get_current_candidates(self) -> List[Dict]:
         """현재 후보 단어들 반환"""
         if not self.word_length:
             return []
@@ -328,7 +318,7 @@ if __name__ == "__main__":
     # 테스트를 위해 경로를 직접 지정합니다. 실제 플레이는 play_hongdle.py를 사용하세요.
     project_root = Path(__file__).parent.parent
     db_path = str(project_root / 'data' / 'korean_words_full.db') # 테스트용 기본 DB
-    engine = GameEngine(db_path=db_path)
+    engine = GameEngine(db_path)
     
     # DB 상태 확인
     stats = engine.db.get_statistics()
