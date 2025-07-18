@@ -1,241 +1,120 @@
+"""
+홍들(Wordle) 최적의 시작 단어 탐색기
+
+기능:
+1. 지정된 자모음 길이에 해당하는 단어를 DB에서 조회합니다.
+2. 각 단어의 자모음이 중복되지 않는 단어만 필터링합니다. (최적의 시작 단어 조건)
+3. 필터링된 단어들을 빈도수(frequency) 기준으로 정렬합니다.
+4. 결과를 텍스트 파일로 저장하며, 상세 정보(빈도, 자모음) 포함 여부를 선택할 수 있습니다.
+"""
+
 import sys
 from pathlib import Path
-from typing import List, Dict, Set
-from collections import Counter
+import argparse
 
-# src 폴더의 모듈들 import (misc에서 src로)
+# --- 경로 설정 ---
+# 이 스크립트는 'misc' 폴더에 있으므로, 'src' 폴더를 경로에 추가해야
+# WordDatabase 같은 모듈을 임포트할 수 있습니다.
 current_dir = Path(__file__).parent
-src_dir = current_dir.parent / 'src'  # misc의 상위폴더/src
+project_root = current_dir.parent
+src_dir = project_root / 'src'
 sys.path.append(str(src_dir))
 
+# 이제 src 폴더의 모듈을 임포트할 수 있습니다.
 from word_database import WordDatabase
 
-class OptimalWordFinder:
-    """자모음이 중복되지 않는 최적의 시작 단어를 찾는 클래스"""
+def find_optimal_starting_words(lengths: list[int], output_dir: Path, include_details: bool):
+    """
+    빈도수가 높고 자모음이 중복되지 않는 최적의 시작 단어를 찾아 파일로 저장합니다.
+    """
+    print("🚀 최적의 시작 단어 찾기를 시작합니다...")
+
+    # 1. 데이터베이스 경로 설정
+    db_path = project_root / 'data' / 'korean_words_full.db'
     
-    def __init__(self, db_path: str = r"C:\Users\Jaewon Song\Documents\Development\hongdle\data\korean_words.db"):
-        """
-        Args:
-            db_path: 데이터베이스 경로
-        """
-        self.db = WordDatabase(db_path)
-    
-    def has_duplicate_jamos(self, jamos_str: str) -> bool:
-        """
-        자모음 문자열에 중복이 있는지 확인
+    if not db_path.exists():
+        print(f"❌ 오류: 데이터베이스 파일을 찾을 수 없습니다: {db_path}")
+        return
+
+    db = WordDatabase(str(db_path))
+    stats = db.get_statistics()
+    print(f"📚 데이터베이스 로드 완료: 총 {stats['total_words']:,}개 단어")
+
+    # 출력 디렉토리 생성
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 2. 각 목표 길이에 대해 분석
+    for length in lengths:
+        print(f"\n🔍 [{length}자모음 단어 분석 중...]")
         
-        Args:
-            jamos_str: 자모음 문자열 (예: "ㄱㅏㅣㄴㅏㄹㅣ")
-            
-        Returns:
-            중복 여부
-        """
-        jamos_list = list(jamos_str)
-        return len(jamos_list) != len(set(jamos_list))
-    
-    def find_optimal_words(self, target_length: int) -> List[Dict]:
-        """
-        특정 길이의 자모음 중복 없는 단어들 찾기
+        # 3. 해당 길이의 모든 단어 가져오기
+        # get_words_by_length는 이미 빈도순으로 정렬되어 있습니다.
+        all_words_at_length = db.get_words_by_length(length)
+        if not all_words_at_length:
+            print(f"  - {length}자모음 단어가 데이터베이스에 없습니다.")
+            continue
         
-        Args:
-            target_length: 목표 자모음 개수 (5, 6, 7)
-            
-        Returns:
-            최적 단어들 리스트
-        """
-        print(f"\n=== {target_length}자모음 최적 단어 검색 중 ===")
+        print(f"  - 총 {len(all_words_at_length):,}개의 단어 발견.")
+
+        # 4. 자모음이 중복되지 않는 단어만 필터링
+        unique_jamo_words = [
+            word_info for word_info in all_words_at_length
+            if len(word_info['jamos']) == len(set(word_info['jamos']))
+        ]
+        print(f"  - 자모음이 중복되지 않는 단어: {len(unique_jamo_words):,}개")
+
+        # 5. 파일로 저장
+        output_filename = f"initial_test_{length}jamo.txt"
+        output_path = output_dir / output_filename
         
-        # 해당 길이의 모든 단어 조회
-        all_words = self.db.get_words_by_length(target_length)
-        print(f"총 {target_length}자모음 단어: {len(all_words)}개")
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(f"# {length}자모음 최적 시작 단어 후보 (빈도순)\n")
+            f.write(f"# 총 {len(unique_jamo_words)}개 단어\n")
+            f.write("# ------------------------------------\n")
+            for word_info in unique_jamo_words:
+                if include_details:
+                    # 상세 정보 포함하여 저장
+                    line = f"{word_info['word']:<6} (빈도: {word_info['frequency']:<5}) | 자모: {word_info['jamos']}"
+                else:
+                    # 단어만 저장
+                    line = word_info['word']
+                f.write(f"{line}\n")
         
-        optimal_words = []
-        
-        for word_info in all_words:
-            jamos_str = word_info['jamos']
-            
-            # 자모음 중복 확인
-            if not self.has_duplicate_jamos(jamos_str):
-                optimal_words.append({
-                    'word': word_info['word'],
-                    'length': word_info['length'],
-                    'jamos': jamos_str,
-                    'jamos_list': list(jamos_str)
-                })
-        
-        print(f"자모음 중복 없는 단어: {len(optimal_words)}개")
-        return optimal_words
-    
-    def analyze_jamo_frequency(self, words_data: List[Dict]) -> Dict:
-        """
-        자모음별 사용 빈도 분석
-        
-        Args:
-            words_data: 단어 데이터 리스트
-            
-        Returns:
-            자모음별 빈도 정보
-        """
-        jamo_counter = Counter()
-        
-        for word_data in words_data:
-            for jamo in word_data['jamos_list']:
-                jamo_counter[jamo] += 1
-        
-        return dict(jamo_counter)
-    
-    def rank_words_by_frequency(self, words_data: List[Dict]) -> List[Dict]:
-        """
-        자모음 빈도를 고려해서 단어를 순위별로 정렬
-        (더 자주 나오는 자모음들을 포함한 단어를 우선순위로)
-        
-        Args:
-            words_data: 단어 데이터 리스트
-            
-        Returns:
-            빈도 점수 순으로 정렬된 단어 리스트
-        """
-        # 전체 단어에서 자모음 빈도 계산
-        all_words = []
-        for length in [5, 6, 7]:
-            length_words = self.db.get_words_by_length(length)
-            all_words.extend(length_words)
-        
-        total_jamo_counter = Counter()
-        for word_info in all_words:
-            for jamo in word_info['jamos']:
-                total_jamo_counter[jamo] += 1
-        
-        # 각 단어의 빈도 점수 계산
-        for word_data in words_data:
-            score = sum(total_jamo_counter[jamo] for jamo in word_data['jamos_list'])
-            word_data['frequency_score'] = score
-        
-        # 빈도 점수 순으로 정렬 (높은 점수부터)
-        return sorted(words_data, key=lambda x: x['frequency_score'], reverse=True)
-    
-    def export_optimal_words(self, output_dir: str = r"C:\Users\Jaewon Song\Documents\Development\hongdle\data") -> Dict[int, str]:
-        """
-        최적 단어들을 텍스트 파일로 내보내기
-        
-        Args:
-            output_dir: 출력 디렉토리
-            
-        Returns:
-            {길이: 파일경로} 딕셔너리
-        """
-        output_path = Path(output_dir)
-        output_path.mkdir(exist_ok=True)
-        
-        exported_files = {}
-        
-        for length in [5, 6, 7]:
-            # 최적 단어 찾기
-            optimal_words = self.find_optimal_words(length)
-            
-            if not optimal_words:
-                print(f"❌ {length}자모음 최적 단어가 없습니다.")
-                continue
-            
-            # 빈도별 순위 매기기
-            ranked_words = self.rank_words_by_frequency(optimal_words)
-            
-            # 파일로 저장
-            filename = f"optimal_words_{length}jamos.txt"
-            file_path = output_path / filename
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(f"# {length}자모음 최적 시작 단어 (자모음 중복 없음)\n")
-                f.write(f"# 총 {len(ranked_words)}개 단어\n")
-                f.write(f"# 빈도 점수 순으로 정렬 (높은 점수 = 더 효율적)\n\n")
-                
-                for i, word_data in enumerate(ranked_words, 1):
-                    jamos_display = ' '.join(word_data['jamos_list'])
-                    f.write(f"{word_data['word']}\t{jamos_display}\t{word_data['frequency_score']}\n")
-            
-            exported_files[length] = str(file_path)
-            print(f"✅ {length}자모음: {len(ranked_words)}개 단어 → {file_path}")
-        
-        return exported_files
-    
-    def show_top_recommendations(self, top_n: int = 10):
-        """각 길이별 상위 추천 단어들 출력"""
-        print("\n" + "="*80)
-        print("🎯 자모음 중복 없는 최적 시작 단어 추천")
-        print("="*80)
-        
-        for length in [5, 6, 7]:
-            optimal_words = self.find_optimal_words(length)
-            
-            if not optimal_words:
-                print(f"\n[ {length}자모음 ]: 추천 단어 없음")
-                continue
-            
-            ranked_words = self.rank_words_by_frequency(optimal_words)
-            
-            print(f"\n[ {length}자모음 최적 단어 TOP {min(top_n, len(ranked_words))} ]")
-            print("-" * 60)
-            
-            for i, word_data in enumerate(ranked_words[:top_n], 1):
-                jamos_display = ' '.join(word_data['jamos_list'])
-                score = word_data['frequency_score']
-                print(f"{i:2d}. {word_data['word']:<8} → {jamos_display:<20} (점수: {score})")
-    
-    def analyze_database(self):
-        """데이터베이스 전체 분석"""
-        stats = self.db.get_statistics()
-        
-        print("=" * 60)
-        print("📊 데이터베이스 분석")
-        print("=" * 60)
-        print(f"총 단어 수: {stats['total_words']:,}개")
-        print(f"DB 크기: {stats['db_size_mb']}MB")
-        print(f"길이별 분포:")
-        
-        total_optimal = 0
-        
-        for length, count in sorted(stats['length_distribution'].items()):
-            optimal_words = self.find_optimal_words(length)
-            optimal_count = len(optimal_words)
-            optimal_ratio = (optimal_count / count * 100) if count > 0 else 0
-            
-            if length in [5, 6, 7]:
-                total_optimal += optimal_count
-                print(f"  {length}자모음: {count:,}개 → 최적: {optimal_count}개 ({optimal_ratio:.1f}%)")
-            else:
-                print(f"  {length}자모음: {count:,}개")
-        
-        print(f"\n총 최적 시작 단어: {total_optimal}개")
+        print(f"✅ 결과 저장 완료: {output_path.relative_to(project_root)}")
+
+    print("\n🎉 모든 작업이 완료되었습니다.")
 
 def main():
-    """메인 실행 함수"""
-    print("🎮 한국어 Wordle 최적 시작 단어 찾기")
-    print("="*60)
+    parser = argparse.ArgumentParser(
+        description="홍들(Wordle) 최적의 시작 단어를 찾아 파일로 저장합니다.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    parser.add_argument(
+        '-l', '--lengths',
+        nargs='+',
+        type=int,
+        default=[5, 6, 7],
+        help="분석할 자모음 길이를 공백으로 구분하여 입력합니다. (기본값: 5 6 7)"
+    )
+    parser.add_argument(
+        '-o', '--output_dir',
+        type=str,
+        default=str(project_root / 'data'),
+        help=f"결과 파일을 저장할 디렉토리입니다. (기본값: data/)"
+    )
+    parser.add_argument(
+        '--details',
+        action='store_true',
+        help="출력 파일에 단어의 빈도수와 자모음 정보를 포함합니다."
+    )
     
-    try:
-        finder = OptimalWordFinder()
-        
-        # 1. 데이터베이스 분석
-        finder.analyze_database()
-        
-        # 2. 최적 단어 추천
-        finder.show_top_recommendations(10)
-        
-        # 3. 파일로 내보내기
-        print(f"\n📁 파일 내보내기 중...")
-        exported_files = finder.export_optimal_words()
-        
-        print(f"\n🎉 완료!")
-        print(f"내보낸 파일:")
-        for length, file_path in exported_files.items():
-            print(f"  {length}자모음: {file_path}")
-        
-        print(f"\n💡 사용법:")
-        print(f"  - 각 파일의 상위 단어들이 가장 효율적인 시작 단어입니다.")
-        print(f"  - 빈도 점수가 높을수록 더 많은 정보를 얻을 수 있습니다.")
-        
-    except Exception as e:
-        print(f"❌ 오류 발생: {e}")
+    args = parser.parse_args()
+    
+    find_optimal_starting_words(
+        lengths=args.lengths,
+        output_dir=Path(args.output_dir),
+        include_details=args.details
+    )
 
 if __name__ == "__main__":
     main()
