@@ -8,6 +8,7 @@
 
 import sys
 from pathlib import Path
+from typing import Tuple, Optional
 
 # src 폴더의 모듈들 import
 current_dir = Path(__file__).parent
@@ -15,6 +16,36 @@ src_dir = current_dir.parent / 'src'
 sys.path.append(str(src_dir))
 
 from game_engine import GameEngine
+
+def select_game_mode(project_root: Path) -> Optional[str]:
+    """사용자에게 게임 모드를 선택받아 DB 경로를 반환합니다."""
+    simple_db_path = str(project_root / 'data' / 'korean_words_simple.db')
+    full_db_path = str(project_root / 'data' / 'korean_words_full.db')
+
+    simple_exists = Path(simple_db_path).exists()
+    full_exists = Path(full_db_path).exists()
+
+    if not simple_exists and not full_exists:
+        print("\n❌ 'data' 폴더에 'korean_words_simple.db' 또는 'korean_words_full.db' 파일이 없습니다.")
+        print("   DB 생성 스크립트를 먼저 실행해주세요.")
+        return None
+
+    print("\n🕹️  게임 모드를 선택하세요:")
+    options = {}
+    if simple_exists:
+        options['1'] = simple_db_path
+        print("1. 🚀 Simple 모드 (간단한 단어 DB로 빠르게 검색)")
+    if full_exists:
+        options['2'] = full_db_path
+        print("2. 📚 Full 모드 (모든 단어 DB로 상세하게 검색)")
+
+    while True:
+        choice = input(f"선택 ({', '.join(options.keys())}): ").strip()
+        if choice in options:
+            return options[choice]
+        else:
+            print("❌ 잘못된 입력입니다. 가능한 옵션 중에서 선택하세요.")
+
 
 def play_hongdle_game():
     """한국어 Wordle 누적 게임"""
@@ -37,12 +68,20 @@ def play_hongdle_game():
     print("종료: 'quit' 또는 'q' 입력")
     print("-" * 50)
     
-    engine = GameEngine()
+    # DB 경로 설정
+    project_root = Path(__file__).parent.parent
+    
+    # 모드 선택
+    db_path = select_game_mode(project_root)
+    if not db_path:
+        return # Exit if no DB is selected or available
+
+    # 게임 엔진 초기화
+    engine = GameEngine(db_path=db_path)
     
     # DB 상태 확인
     stats = engine.db.get_statistics()
     print(f"📚 데이터베이스: 총 {stats['total_words']:,}개 단어 준비완료")
-    
     if stats['total_words'] == 0:
         print("❌ 데이터베이스가 비어있습니다.")
         return

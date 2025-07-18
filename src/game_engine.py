@@ -34,10 +34,24 @@ from word_database import WordDatabase
 class GameEngine:
     """한국어 Wordle 게임 엔진 - 간소화된 누적 조건 전용"""
     
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str, fallback_db_path: str = None):
         """게임 엔진 초기화"""
         self.processor = WordProcessor()
-        self.db = WordDatabase(db_path) if db_path else WordDatabase()
+
+        if not Path(db_path).exists():
+            raise FileNotFoundError(f"주 데이터베이스를 찾을 수 없습니다: {db_path}")
+        self.db = WordDatabase(db_path)
+        # print(f"[INFO] 주 DB가 설정되었습니다: {db_path}") # play_hongdle.py에서 이미 안내하므로 주석 처리
+
+        self.db_fallback = None
+        if fallback_db_path:
+            if Path(fallback_db_path).exists():
+                self.db_fallback = WordDatabase(fallback_db_path)
+                # print(f"[INFO] 폴백(Fallback) DB가 설정되었습니다: {fallback_db_path}")
+            else:
+                # 폴백 DB는 필수가 아니므로 경고만 출력합니다.
+                print(f"[WARNING] 폴백(Fallback) DB를 찾을 수 없습니다: {fallback_db_path}")
+
         self.reset_game()
     
     def reset_game(self):
@@ -157,13 +171,27 @@ class GameEngine:
     
     def _find_candidates(self) -> List[str]:
         """현재 조건에 맞는 후보 단어들 찾기"""
-        all_words = self.db.get_words_by_length(self.word_length)
+        # 1. 주 DB에서 검색
+        all_words_primary = self.db.get_words_by_length(self.word_length)
         candidates = []
         
-        for word_info in all_words:
+        for word_info in all_words_primary:
             word = word_info['word']
             jamos = list(word_info['jamos'])
             
+            if self._check_word_conditions(jamos):
+                candidates.append(word)
+        
+        # 2. 주 DB에서 후보를 찾았거나, 폴백 DB가 없으면 결과 반환
+        if candidates or not self.db_fallback:
+            return candidates
+
+        # 3. 주 DB에 후보가 없고 폴백 DB가 있으면, 폴백 DB에서 검색
+        print("\n[ℹ️  기본 DB에 후보가 없어 전체 DB에서 검색합니다...]")
+        all_words_fallback = self.db_fallback.get_words_by_length(self.word_length)
+        for word_info in all_words_fallback:
+            word = word_info['word']
+            jamos = list(word_info['jamos'])
             if self._check_word_conditions(jamos):
                 candidates.append(word)
         
@@ -297,11 +325,14 @@ if __name__ == "__main__":
     print("=" * 60)
     
     # 게임 엔진 초기화
-    engine = GameEngine()
+    # 테스트를 위해 경로를 직접 지정합니다. 실제 플레이는 play_hongdle.py를 사용하세요.
+    project_root = Path(__file__).parent.parent
+    db_path = str(project_root / 'data' / 'korean_words_full.db') # 테스트용 기본 DB
+    engine = GameEngine(db_path=db_path)
     
     # DB 상태 확인
     stats = engine.db.get_statistics()
-    print(f"데이터베이스: 총 {stats['total_words']:,}개 단어")
+    print(f"테스트 데이터베이스: 총 {stats['total_words']:,}개 단어")
     
     if stats['total_words'] == 0:
         print("❌ 데이터베이스가 비어있습니다.")

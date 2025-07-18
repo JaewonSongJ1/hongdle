@@ -434,105 +434,90 @@ class WordDatabase:
 
 # 사용 예시
 if __name__ == "__main__":
+    import argparse
     import sys
     from pathlib import Path
-    
+
     # src 폴더에서 실행할 때를 대비해 경로 설정
     current_dir = Path(__file__).parent
     sys.path.append(str(current_dir))
-    
+
     from word_processor import WordProcessor
-    
-    print("=== 한국어 단어 DB 구축 및 테스트 ===")
-    
-    # 초기화 (자동으로 프로젝트의 data 폴더 사용)
-    processor = WordProcessor()
-    db = WordDatabase()
-    
-    # 텍스트 파일 경로 (상대경로로 변경)
+
+    # 1. Command-line argument parser 설정
+    parser = argparse.ArgumentParser(description="텍스트 파일에서 단어를 읽어 SQLite 데이터베이스를 생성합니다.")
+    parser.add_argument(
+        '-i', '--input',
+        type=str,
+        required=True,
+        help="입력으로 사용할 단어 목록 텍스트 파일 경로. (예: data/korean_word_clean.txt)"
+    )
+    parser.add_argument(
+        '-o', '--output',
+        type=str,
+        required=True,
+        help="생성할 SQLite 데이터베이스 파일 경로. (예: data/korean_words.db)"
+    )
+    parser.add_argument(
+        '--force',
+        action='store_true',
+        help="기존 데이터베이스 파일이 있으면 덮어씁니다."
+    )
+    args = parser.parse_args()
+
+    # 프로젝트 루트를 기준으로 상대 경로를 절대 경로로 변환
     project_root = Path(__file__).parent.parent
-    text_file_path = project_root / "data" / "korean_words_clean_v2.txt"
-    
-    # 파일 존재 확인
-    if text_file_path.exists():
-        print(f"📖 텍스트 파일 처리 중: {text_file_path}")
-        
-        try:
-            # 텍스트 파일에서 단어 데이터 처리
-            words_data = processor.parse_text_file(str(text_file_path))
-            print(f"✅ {len(words_data)}개 단어 처리 완료")
-            
-            # 기존 데이터 삭제 후 새로 구축
-            print("💾 기존 데이터 삭제 중...")
-            db.clear_all_words()
-            
-            # DB에 일괄 삽입
-            print("💾 데이터베이스 구축 중...")
-            result = db.bulk_insert(words_data)
-            
-            print(f"✅ DB 구축 완료!")
-            print(f"  - 삽입된 단어: {result['inserted']}개")
-            print(f"  - 중복 단어: {result['duplicated']}개")
-            print(f"  - 오류: {result['errors']}개")
-            
-        except Exception as e:
-            print(f"❌ 처리 중 오류: {e}")
-            # 샘플 단어로 테스트
-            print("📝 샘플 단어로 테스트 진행...")
-            sample_words = ["개나리", "클로드", "안녕하세요", "프로그램", "컴퓨터"]
-            
-            for word in sample_words:
-                if processor.is_valid_word(word):
-                    word_data = processor.create_word_data(word)
-                    success = db.insert_word(word_data)
-                    print(f"  {word}: {'저장됨' if success else '실패 또는 중복'}")
-    else:
-        print(f"❌ 텍스트 파일을 찾을 수 없습니다: {text_file_path}")
-        print("📝 샘플 단어로 테스트 진행...")
-        
-        # 샘플 단어들로 테스트
-        sample_words = ["개나리", "클로드", "안녕하세요", "프로그램", "컴퓨터", "데이터베이스"]
-        
-        for word in sample_words:
-            if processor.is_valid_word(word):
-                word_data = processor.create_word_data(word)
-                success = db.insert_word(word_data)
-                print(f"  {word}: {'저장됨' if success else '실패 또는 중복'}")
-    
-    # 데이터베이스 통계 및 테스트
-    print("\n📊 데이터베이스 통계:")
-    stats = db.get_statistics()
-    print(f"  총 단어 수: {stats['total_words']:,}개")
-    print(f"  DB 크기: {stats['db_size_mb']}MB")
-    print(f"  DB 위치: {stats['db_path']}")
-    
-    if stats['length_distribution']:
-        print(f"  길이별 분포:")
-        for length, count in sorted(stats['length_distribution'].items()):
-            print(f"    {length}자모음: {count:,}개")
-    
-    # 샘플 검색 테스트
-    if stats['total_words'] > 0:
-        print("\n🔍 검색 테스트:")
-        
-        # 6자모음 단어 조회
-        words_6 = db.get_words_by_length(6)
-        if words_6:
-            print(f"  6자모음 단어 (상위 5개):")
-            for i, word_info in enumerate(words_6[:5]):
-                print(f"    {i+1}. {word_info['word']} -> {word_info['jamos']}")
-        
-        # 게임용 패턴 검색 테스트
-        search_result = db.search_words_by_jamo_pattern(
-            length=6,
-            known_positions={1: 'ㅐ'}  # 2번째 자리에 'ㅐ'
-        )
-        
-        if search_result:
-            print(f"  2번째 자리에 'ㅐ'가 있는 6자모음 단어: {len(search_result)}개")
-            for i, word_info in enumerate(search_result[:3]):
-                print(f"    {i+1}. {word_info['word']} -> {word_info['jamos']}")
-    
-    print(f"\n🎉 테스트 완료!")
-    print(f"✅ DB 파일: {db.db_path}")
-    print(f"이제 이 DB를 사용해서 게임 로직을 개발할 수 있습니다!")
+    input_file_path = project_root / args.input
+    output_db_path = project_root / args.output
+
+    # 2. 파일 존재 여부 확인
+    if not input_file_path.exists():
+        print(f"❌ 오류: 입력 파일 '{input_file_path}'를 찾을 수 없습니다.")
+        sys.exit(1)
+
+    if output_db_path.exists() and not args.force:
+        overwrite = input(f"⚠️  경고: 출력 파일 '{output_db_path}'가 이미 존재합니다. 덮어쓰시겠습니까? (y/n): ").lower()
+        if overwrite != 'y':
+            print("작업을 취소했습니다.")
+            sys.exit(0)
+
+    # 3. DB 구축 프로세스 실행
+    print("\n=== 한국어 단어 DB 구축 시작 ===")
+    print(f"📖 입력 파일: {input_file_path}")
+    print(f"💾 출력 DB:   {output_db_path}")
+
+    try:
+        processor = WordProcessor()
+
+        print(f"\n📖 텍스트 파일 처리 중...")
+        # 입력 파일은 이미 정제되었다고 가정하고, 모든 유효한 한글 단어를 처리합니다.
+        words_data = []
+        with open(input_file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                word = line.strip()
+                if word and processor.is_valid_hangul(word):
+                    words_data.append(processor.create_word_data(word))
+
+        print(f"✅ {len(words_data)}개 유효 단어 처리 완료")
+
+        db = WordDatabase(db_path=str(output_db_path))
+
+        print("💾 기존 데이터 삭제 및 DB 초기화 중...")
+        db.clear_all_words()
+
+        print("💾 데이터베이스에 단어 삽입 중...")
+        result = db.bulk_insert(words_data)
+
+        print("\n🎉 DB 구축 완료!")
+        print(f"  - 삽입된 단어: {result['inserted']}개")
+        print(f"  - 중복 단어: {result['duplicated']}개 (무시됨)")
+        print(f"  - 오류: {result['errors']}개")
+
+        print("\n📊 최종 데이터베이스 통계:")
+        stats = db.get_statistics()
+        print(f"  - 총 단어 수: {stats['total_words']:,}개")
+        print(f"  - DB 크기: {stats['db_size_mb']}MB")
+
+    except Exception as e:
+        print(f"\n❌ 처리 중 심각한 오류 발생: {e}")
+        sys.exit(1)
