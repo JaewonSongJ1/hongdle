@@ -33,24 +33,44 @@ class WordDatabase:
         self.init_database()
     
     def init_database(self):
-        """데이터베이스 테이블 생성 및 초기화"""
+        """데이터베이스 테이블 생성 및 스키마 마이그레이션"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # words 테이블 생성
-        # frequency 컬럼을 추가하여 단어 빈도를 저장합니다.
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS words (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                word TEXT UNIQUE NOT NULL,
-                length INTEGER NOT NULL,
-                jamos TEXT NOT NULL,
-                frequency INTEGER NOT NULL DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+        # 1. words 테이블 생성 또는 마이그레이션
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='words'")
+        table_exists = cursor.fetchone()
+
+        if not table_exists:
+            # 테이블이 없으면 최신 스키마로 새로 생성
+            cursor.execute('''
+                CREATE TABLE words (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    word TEXT UNIQUE NOT NULL,
+                    length INTEGER NOT NULL,
+                    jamos TEXT NOT NULL,
+                    frequency INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+        else:
+            # 테이블이 있으면, 누락된 컬럼이 있는지 확인하고 추가 (간단한 스키마 마이그레이션)
+            cursor.execute("PRAGMA table_info(words)")
+            columns = [info[1] for info in cursor.fetchall()]
+            
+            # NOTE: NOT NULL 제약조건과 함께 컬럼을 추가하려면 DEFAULT 값이 필요합니다.
+            # 이 값들은 데이터 재구축 시 올바르게 채워져야 합니다.
+            if 'length' not in columns:
+                print("INFO: 'words' 테이블에 'length' 컬럼을 추가합니다. 정확한 값을 위해서는 DB 재생성이 필요합니다.")
+                cursor.execute('ALTER TABLE words ADD COLUMN length INTEGER NOT NULL DEFAULT 0')
+            if 'jamos' not in columns:
+                print("INFO: 'words' 테이블에 'jamos' 컬럼을 추가합니다. 정확한 값을 위해서는 DB 재생성이 필요합니다.")
+                cursor.execute('ALTER TABLE words ADD COLUMN jamos TEXT NOT NULL DEFAULT ""')
+            if 'frequency' not in columns:
+                print("INFO: 'words' 테이블에 'frequency' 컬럼을 추가합니다.")
+                cursor.execute('ALTER TABLE words ADD COLUMN frequency INTEGER NOT NULL DEFAULT 0')
         
-        # 메타데이터 테이블 생성 (DB 정보 저장용)
+        # 2. 메타데이터 테이블 생성 (DB 정보 저장용)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
@@ -58,16 +78,14 @@ class WordDatabase:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        
-        # 인덱스 생성
+        # 3. 인덱스 생성 (IF NOT EXISTS로 안전하게 실행)
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_length ON words(length)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_jamos ON words(jamos)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_frequency ON words(frequency DESC)')
-        
-        # 메타데이터 초기화
+        # 4. 메타데이터 초기화
         cursor.execute('''
             INSERT OR IGNORE INTO metadata (key, value) 
-            VALUES ('db_version', '1.0')
+            VALUES ('db_version', '1.1')
         ''')
         cursor.execute('''
             INSERT OR IGNORE INTO metadata (key, value) 
@@ -456,18 +474,11 @@ if __name__ == "__main__":
     from word_processor import WordProcessor
 
     # 1. Command-line argument parser 설정
-    parser = argparse.ArgumentParser(description="텍스트 파일에서 단어를 읽어 SQLite 데이터베이스를 생성합니다.")
+    parser = argparse.ArgumentParser(description="한국어 단어 사전을 위한 SQLite 데이터베이스를 생성합니다.")
     parser.add_argument(
-        '-i', '--input',
-        type=str,
-        required=True,
-        help="입력으로 사용할 단어 목록 텍스트 파일 경로. (예: data/korean_word_clean.txt)"
-    )
-    parser.add_argument(
-        '-o', '--output',
-        type=str,
-        required=True,
-        help="생성할 SQLite 데이터베이스 파일 경로. (예: data/korean_words.db)"
+        '--full',
+        action='store_true',
+        help="'korean_word_clean_list_big.txt'를 사용하여 빈도수 없는 전체 단어 DB('korean_words_full.db')를 생성합니다."
     )
     parser.add_argument(
         '--force',
@@ -476,47 +487,68 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    # 2. --full 플래그에 따라 입출력 파일 결정
+    if args.full:
+        # 빈도수 없는 전체 단어 DB 생성
+        input_filename = "korean_word_clean_list_big.txt"
+        output_filename = "korean_words_full.db"
+        is_full_mode = True
+        print("\n=== 전체 단어 DB (korean_words_full.db) 구축 모드 ===")
+    else:
+        # 빈도수 포함된 기본 단어 DB 생성
+        input_filename = "korean_word_clean_list.txt"
+        output_filename = "korean_words.db"
+        is_full_mode = False
+        print("\n=== 기본 단어 DB (korean_words.db) 구축 모드 ===")
+
     # 프로젝트 루트를 기준으로 상대 경로를 절대 경로로 변환
     project_root = Path(__file__).parent.parent
-    input_file_path = project_root / args.input
-    output_db_path = project_root / args.output
+    input_file_path = project_root / "data" / input_filename
+    output_db_path = project_root / "data" / output_filename
 
-    # 2. 파일 존재 여부 확인
+    # 3. 파일 존재 여부 확인
     if not input_file_path.exists():
         print(f"❌ 오류: 입력 파일 '{input_file_path}'를 찾을 수 없습니다.")
         sys.exit(1)
 
     if output_db_path.exists() and not args.force:
-        overwrite = input(f"⚠️  경고: 출력 파일 '{output_db_path}'가 이미 존재합니다. 덮어쓰시겠습니까? (y/n): ").lower()
+        overwrite = input(f"⚠️ 경고: 출력 파일 '{output_db_path}'가 이미 존재합니다. 덮어쓰시겠습니까? (y/n): ").lower()
         if overwrite != 'y':
             print("작업을 취소했습니다.")
             sys.exit(0)
 
-    # 3. DB 구축 프로세스 실행
-    print("\n=== 한국어 단어 DB 구축 시작 ===")
-    print(f"📖 입력 파일: {input_file_path}")
-    print(f"💾 출력 DB:   {output_db_path}")
+    # 4. DB 구축 프로세스 실행
+    print(f"📖 입력 파일: data/{input_filename}")
+    print(f"💾 출력 DB:   data/{output_filename}")
 
     try:
         processor = WordProcessor()
+        words_data = []
 
         print(f"\n📖 텍스트 파일 처리 중...")
-        # 입력 파일은 이미 정제되었다고 가정하고, 모든 유효한 한글 단어를 처리합니다.
-        # '단어 빈도' 형식의 파일을 파싱합니다.
-        words_data = []
         with open(input_file_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) == 2:
-                    word, freq_str = parts
-                    try:
-                        frequency = int(freq_str)
-                        if processor.is_valid_hangul(word):
-                            word_data = processor.create_word_data(word)
-                            word_data['frequency'] = frequency
-                            words_data.append(word_data)
-                    except ValueError:
-                        continue # 빈도 값이 숫자가 아니면 무시
+            if is_full_mode:
+                # korean_word_clean_list_big.txt (단어만 있는 파일) 처리
+                for line in f:
+                    word = line.strip()
+                    if word and processor.is_valid_hangul(word):
+                        word_data = processor.create_word_data(word)
+                        # frequency는 DB 스키마의 기본값 0으로 저장됨
+                        words_data.append(word_data)
+            else:
+                # korean_word_clean_list.txt ('단어 빈도수' 형식) 처리
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) == 2:
+                        word, freq_str = parts
+                        try:
+                            frequency = int(freq_str)
+                            if processor.is_valid_hangul(word):
+                                word_data = processor.create_word_data(word)
+                                word_data['frequency'] = frequency
+                                words_data.append(word_data)
+                        except ValueError:
+                            continue # 빈도 값이 숫자가 아니면 무시
 
         print(f"✅ {len(words_data)}개 유효 단어 처리 완료")
 
