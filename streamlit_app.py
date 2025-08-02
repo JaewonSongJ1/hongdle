@@ -7,6 +7,7 @@ play_hongdle.py의 모든 기능을 웹 인터페이스로 구현
 import streamlit as st
 import sys
 import io
+import random
 from pathlib import Path
 
 # 페이지 설정
@@ -46,15 +47,25 @@ st.markdown("""
 def setup_modules():
     """홍들 모듈 import 설정"""
     try:
-        # 경로 설정
+        # 경로 설정 (클라우드 환경 고려)
         current_dir = Path(__file__).parent if '__file__' in globals() else Path.cwd()
-        src_dir = current_dir / 'src'
         
-        if not src_dir.exists():
-            src_dir = current_dir.parent / 'src'
+        # 로컬과 클라우드 환경 모두 지원
+        possible_paths = [
+            current_dir / 'src',
+            current_dir.parent / 'src',
+            Path.cwd() / 'src'
+        ]
         
-        if not src_dir.exists():
+        src_dir = None
+        for path in possible_paths:
+            if path.exists():
+                src_dir = path
+                break
+        
+        if src_dir is None:
             st.error("❌ src 폴더를 찾을 수 없습니다. 홍들 프로젝트 루트에서 실행해주세요.")
+            st.info("💡 GitHub에서 src 폴더가 포함되어 있는지 확인해주세요.")
             return False
             
         if str(src_dir) not in sys.path:
@@ -66,20 +77,147 @@ def setup_modules():
         
     except ImportError as e:
         st.error(f"❌ GameEngine 모듈 import 실패: {e}")
+        st.info("💡 src 폴더의 모든 파일이 GitHub에 업로드되었는지 확인해주세요.")
         return False
     except Exception as e:
         st.error(f"❌ 모듈 설정 오류: {e}")
         return False
 
 def get_database_path(mode):
-    """데이터베이스 파일 경로 반환"""
+    """데이터베이스 파일 경로 반환 (클라우드 환경 고려)"""
     current_dir = Path(__file__).parent if '__file__' in globals() else Path.cwd()
-    project_root = current_dir if (current_dir / 'data').exists() else current_dir.parent
+    
+    # 가능한 데이터 폴더 경로들
+    possible_data_dirs = [
+        current_dir / 'data',
+        current_dir.parent / 'data',
+        Path.cwd() / 'data'
+    ]
     
     db_filename = "korean_words.db" if mode == '1' else "korean_words_full.db"
-    db_path = project_root / "data" / db_filename
     
-    return str(db_path) if db_path.exists() else None
+    # 데이터 폴더 찾기
+    for data_dir in possible_data_dirs:
+        if data_dir.exists():
+            db_path = data_dir / db_filename
+            if db_path.exists():
+                return str(db_path)
+    
+    return None
+
+def load_initial_words(jamo_count):
+    """초기 추천 단어 파일 로드"""
+    current_dir = Path(__file__).parent if '__file__' in globals() else Path.cwd()
+    
+    # 가능한 데이터 폴더 경로들
+    possible_data_dirs = [
+        current_dir / 'data',
+        current_dir.parent / 'data',
+        Path.cwd() / 'data'
+    ]
+    
+    filename = f"initial_test_{jamo_count}jamo.txt"
+    
+    for data_dir in possible_data_dirs:
+        file_path = data_dir / filename
+        if file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                # 주석과 빈 줄 제외하고 단어만 추출
+                words = []
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith('#') and not line.startswith('-'):
+                        words.append(line)
+                
+                return words
+            except Exception as e:
+                st.error(f"파일 읽기 오류 ({filename}): {e}")
+                return []
+    
+    return []
+
+def display_initial_words(words, jamo_count):
+    """초기 추천 단어들을 클릭 가능한 버튼으로 표시"""
+    if not words:
+        st.error(f"❌ {jamo_count}자모음 단어 파일을 찾을 수 없습니다.")
+        return
+    
+    # 세션 상태에서 표시할 단어들 관리
+    session_key = f'initial_words_{jamo_count}'
+    display_key = f'initial_display_count_{jamo_count}'
+    
+    if session_key not in st.session_state:
+        # 랜덤하게 단어들 섞기
+        shuffled_words = words.copy()
+        random.shuffle(shuffled_words)
+        st.session_state[session_key] = shuffled_words
+    
+    if display_key not in st.session_state:
+        st.session_state[display_key] = 20
+    
+    current_words = st.session_state[session_key]
+    current_display = min(st.session_state[display_key], len(current_words))
+    
+    st.subheader(f"🎯 {jamo_count}자모음 추천 단어 ({current_display}/{len(current_words):,}개)")
+    st.info(f"최적 시작 단어들을 랜덤하게 표시합니다. 클릭하여 선택하세요!")
+    
+    # 4열 그리드로 배치
+    cols = st.columns(4)
+    for i in range(current_display):
+        word = current_words[i]
+        col_idx = i % 4
+        
+        with cols[col_idx]:
+            if st.button(
+                f"**{word}**",
+                key=f"initial_word_{jamo_count}_{i}",
+                use_container_width=True,
+                help=f"클릭하면 '{word}'가 입력창에 자동으로 채워집니다"
+            ):
+                st.session_state.selected_word = word
+                # 게임 모드 선택으로 이동
+                st.session_state.word_selected_from_initial = True
+                st.rerun()
+    
+    # "더 보기" 버튼
+    if current_display < len(current_words):
+        remaining = len(current_words) - current_display
+        next_batch = min(20, remaining)
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button(
+                f"📋 더 보기 (+{next_batch}개)",
+                key=f"more_initial_{jamo_count}",
+                use_container_width=True
+            ):
+                st.session_state[display_key] += 20
+                st.rerun()
+        
+        # 진행 상황 표시
+        progress = current_display / len(current_words)
+        st.progress(progress, text=f"{current_display}/{len(current_words):,}개 표시됨 ({progress:.1%})")
+    
+    elif len(current_words) > 20:
+        # 모든 단어를 다 보여준 경우
+        st.success(f"✅ 모든 {len(current_words):,}개 단어를 표시했습니다!")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button(
+                "🔄 다시 섞기", 
+                key=f"reshuffle_initial_{jamo_count}",
+                use_container_width=True
+            ):
+                # 단어들을 다시 섞고 처음부터 표시
+                shuffled_words = words.copy()
+                random.shuffle(shuffled_words)
+                st.session_state[session_key] = shuffled_words
+                st.session_state[display_key] = 20
+                st.rerun()
 
 def display_candidates_as_buttons(candidates, max_display=20):
     """후보 단어들을 클릭 가능한 버튼으로 표시 (더 보기 기능 포함)"""
@@ -228,9 +366,36 @@ if 'selected_word' not in st.session_state:
     st.session_state.selected_word = ''
 if 'display_count' not in st.session_state:
     st.session_state.display_count = 20
+if 'show_initial_words' not in st.session_state:
+    st.session_state.show_initial_words = None
+if 'word_selected_from_initial' not in st.session_state:
+    st.session_state.word_selected_from_initial = False
 
 # 1단계: 게임 모드 선택
 if not st.session_state.game_initialized:
+    # 초기 단어가 선택된 경우 바로 모드 선택으로
+    if st.session_state.word_selected_from_initial:
+        st.success(f"선택된 단어: **{st.session_state.selected_word}**")
+        st.info("이제 게임 모드를 선택해주세요!")
+        st.session_state.word_selected_from_initial = False
+    
+    # 초기 추천 단어 표시 상태 확인
+    if st.session_state.show_initial_words is not None:
+        jamo_count = st.session_state.show_initial_words
+        words = load_initial_words(jamo_count)
+        display_initial_words(words, jamo_count)
+        
+        # 뒤로 가기 버튼
+        if st.button("⬅️ 처음으로 돌아가기"):
+            st.session_state.show_initial_words = None
+            # 관련 세션 상태들 초기화
+            for key in list(st.session_state.keys()):
+                if key.startswith('initial_'):
+                    del st.session_state[key]
+            st.rerun()
+        
+        st.markdown("---")
+    
     st.subheader("🎮 게임 모드 선택")
     
     col1, col2 = st.columns(2)
@@ -259,6 +424,29 @@ if not st.session_state.game_initialized:
                 st.error("❌ korean_words_full.db 파일을 찾을 수 없습니다.")
                 st.info("먼저 `python src/word_database.py --full`를 실행해주세요.")
     
+    # 초기 추천 단어 표시가 없을 때만 추천 버튼들 표시
+    if st.session_state.show_initial_words is None:
+        st.markdown("---")
+        st.subheader("💡 시작 단어 추천")
+        st.info("자모음 개수별로 최적의 시작 단어들을 추천해드립니다!")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🎯 5자모음 추천", use_container_width=True):
+                st.session_state.show_initial_words = 5
+                st.rerun()
+        
+        with col2:
+            if st.button("🎯 6자모음 추천", use_container_width=True):
+                st.session_state.show_initial_words = 6
+                st.rerun()
+        
+        with col3:
+            if st.button("🎯 7자모음 추천", use_container_width=True):
+                st.session_state.show_initial_words = 7
+                st.rerun()
+    
     # 게임 설명
     with st.expander("📖 게임 설명"):
         st.markdown("""
@@ -281,6 +469,10 @@ if not st.session_state.game_initialized:
         **모드 차이**:
         - **기본 모드**: 자주 쓰는 단어 (~3만개)
         - **전체 모드**: 모든 단어 포함 (더 많음)
+        
+        **💡 시작 단어 추천**:
+        - 자모음 개수별로 최적화된 시작 단어들을 제공
+        - 효율적인 게임 진행을 위한 선별된 단어들
         """)
     
     st.stop()
@@ -475,9 +667,17 @@ with st.sidebar:
     if st.button("🔄 모드 변경"):
         st.session_state.game_initialized = False
         st.session_state.engine = None
-        # 표시 개수도 리셋
+        # 모든 관련 세션 상태 초기화
         if 'display_count' in st.session_state:
             st.session_state.display_count = 20
+        if 'show_initial_words' in st.session_state:
+            st.session_state.show_initial_words = None
+        if 'word_selected_from_initial' in st.session_state:
+            st.session_state.word_selected_from_initial = False
+        # 초기 단어 관련 세션 상태들 모두 초기화
+        for key in list(st.session_state.keys()):
+            if key.startswith('initial_'):
+                del st.session_state[key]
         st.rerun()
     
     st.markdown("---")
