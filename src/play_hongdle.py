@@ -161,11 +161,7 @@ def play_hongdle_game():
                 
                 retry = input("   마지막 턴을 되돌리시겠습니까? (y/n): ").strip().lower()
                 if retry in ['y', 'yes', '네', 'ㅇ']:
-                    if engine.turns:
-                        engine.turns.pop()  # 마지막 턴 제거
-                        engine.reset_game()  # 조건 재계산
-                        for turn in engine.turns:
-                            engine._update_conditions(turn['jamos'], turn['pattern'])
+                    if engine.undo_last_turn():
                         print("↩️  마지막 턴이 취소되었습니다.")
                     else:
                         print("취소할 턴이 없습니다.")

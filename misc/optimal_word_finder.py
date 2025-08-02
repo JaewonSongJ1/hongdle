@@ -30,7 +30,7 @@ def find_optimal_starting_words(lengths: list[int], output_dir: Path, include_de
     print("🚀 최적의 시작 단어 찾기를 시작합니다...")
 
     # 1. 데이터베이스 경로 설정
-    db_path = project_root / 'data' / 'korean_words_full.db'
+    db_path = project_root / 'data' / 'korea_word_clean_list.db'
     
     if not db_path.exists():
         print(f"❌ 오류: 데이터베이스 파일을 찾을 수 없습니다: {db_path}")
